@@ -1,11 +1,47 @@
-name: Hello World Repo Dispatch
+name: CI
 on:
-  repository_dispatch:
-    types: example-event
+  workflow_dispatch:
+    inputs:
+      git-ref:
+        description: Git Ref (Optionals)    
+        required: false 
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
-    - name: foo
-      run: echo ${{ github.event.client_payload.foo }}
+    - uses: actions/checkout@master
+
+    - uses: Azure/docker-login@v1
+      with:
+        login-server: docker.talam.io
+        username: ${{ secrets.REGISTRY_USERNAME }}
+        password: ${{ secrets.REGISTRY_PASSWORD }}
+
+    - run: |
+        docker build . -t docker.talam.io/elix_code:${{ github.sha }}
+        docker push docker.talam.io/elix_code:${{ github.sha }}
+    - uses: Azure/k8s-set-context@v1
+      with:
+        method:  service-account
+        k8s-url:  https://135.181.34.108:16443
+        k8s-secret: ${{ secrets.TALAM_K8S_SECRET }}
+        id:  setcontext
+
+    - uses: Azure/k8s-create-secret@v1
+      with:
+        container-registry-url: docker.talam.io
+        container-registry-username: ${{ secrets.REGISTRY_USERNAME }}
+        container-registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+        secret-name: talam-docker-registry-secret
+
+    - uses: Azure/k8s-deploy@v1
+      with:
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+          manifests/ingress.yml
+        images: |
+          docker.talam.io/elix_code:${{ github.sha }}
+        imagepullsecrets: |
+          talam-docker-registry-secret
